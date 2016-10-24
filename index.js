@@ -8,6 +8,7 @@ const pump = require('pump')
 const through = require('through2')
 const indexer = require('feed-indexer')
 const lexint = require('lexicographic-integer')
+const clone = require('xtend')
 const tradle = require('@tradle/engine')
 const topics = tradle.topics
 const types = tradle.types
