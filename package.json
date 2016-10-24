@@ -1,6 +1,6 @@
 {
   "name": "@tradle/message-context",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "track and forward messages by context",
   "main": "index.js",
   "scripts": {
