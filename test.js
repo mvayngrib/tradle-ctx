@@ -72,7 +72,7 @@ test('contexts', function (t) {
       // msg = {
       //   ...metadata,
       //   object: {
-      //     [TYPE]: 'tradle.Message',  // msg from alice
+      //     [TYPE]: 'tradle.Message',  // msg from bob
       //     object: {
       //       [TYPE]: 'tradle.Message' // original msg from alice
       //       object: {}               // msg1 body

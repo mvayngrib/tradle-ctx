@@ -18,7 +18,7 @@
     "tape": "^4.6.2"
   },
   "dependencies": {
-    "@tradle/engine": "github:tradle/engine",
+    "@tradle/engine": "^3.5.0",
     "debug": "^2.2.0",
     "feed-indexer": "^1.2.1",
     "lexicographic-integer": "^1.1.0",
