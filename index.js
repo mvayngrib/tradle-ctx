@@ -81,7 +81,7 @@ module.exports = function createContextDB (opts) {
           permalink: val.permalink,
           context: context,
           recipient: getRecipient(val),
-          seq: getMessageSeq(val) // not the same as message.seq
+          seq: getMessageSeq(change) // not the same as message.seq
         })
       }
 
@@ -233,6 +233,6 @@ function defaultGetContext (val) {
   return val.context || val.object.context
 }
 
-function defaultGetMessageSeq (msg, context) {
-  return msg.object[SEQ]
+function defaultGetMessageSeq (change) {
+  return change.change
 }
