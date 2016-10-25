@@ -180,14 +180,8 @@ module.exports = function createContextDB (opts) {
     forwarding[identifier] = pump(
       getMessageStream(data),
       through.obj(function (data, enc, cb) {
-        keeper.get(data.permalink, function (err, object) {
-          if (err) {
-            myDebug(`data not found for message: ${data.permalink}`)
-            return cb()
-          }
-
-          node.send({ object, to }, cb)
-        })
+        // messages are immutable so permalink === link
+        node.send({ link: data.permalink, to: to }, cb)
       })
     )
   }
