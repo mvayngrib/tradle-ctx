@@ -9,6 +9,7 @@ const through = require('through2')
 const indexer = require('feed-indexer')
 const lexint = require('lexicographic-integer')
 const clone = require('xtend')
+const parallel = require('run-parallel')
 const tradle = require('@tradle/engine')
 const topics = tradle.topics
 const types = tradle.types
@@ -73,7 +74,7 @@ module.exports = function createContextDB (opts) {
       if (!context) return cb()
 
       // each message's state gets written exactly once
-      if (state) return cb(null, state)
+      if (state)return cb(null, state)
 
       let newState
       switch (val.topic) {
@@ -177,12 +178,14 @@ module.exports = function createContextDB (opts) {
     }, cb)
   }
 
-  function close () {
+  function close (cb) {
     if (closed) return
 
     closed = true
-    msgDB.close()
-    ctxDB.close()
+    parallel([
+      done => msgDB.close(done),
+      done => ctxDB.close(done)
+    ], cb)
   }
 
   function forward (data) {

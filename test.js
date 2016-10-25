@@ -96,12 +96,25 @@ test('contexts', function (t) {
         msg2wrapper = result.message
       })
 
-      carol.once('message', msg => {
-        // if (msg.author !== alice.permalink) return
-
+      let received
+      carol.on('message', msg => {
+        t.notOk(received)
         t.same(msg.object.object, msg2wrapper.object)
-        t.end()
-        friends.forEach(f => f.destroy())
+        if (received) return // shouldn't happen, but let's prevent the loop
+
+        received = true
+        contextDBs[2].close(function () {
+          contextDBs[2] = createContextsDB({
+            node: carol,
+            db: 'contexts.db'
+          })
+
+          setTimeout(function () {
+            // hacky way to check whether contextDB starts resending stuff it already sent
+            t.end()
+            friends.forEach(friend => friend.destroy())
+          }, 1000)
+        })
       })
     })
   })
