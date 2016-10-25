@@ -57,10 +57,7 @@ module.exports = function createContextDB (opts) {
   const ctxDB = node._createDB('ctx-' + opts.db)
   ctxDB.once('closing', () => closed = true)
 
-  node.once('destroying', () => {
-    msgDB.close()
-    ctxDB.close()
-  })
+  node.once('destroying', close)
 
   const getMessageSeq = opts.getMessageSeq || defaultGetMessageSeq
   const getContext = opts.getContext || defaultGetContext
@@ -74,6 +71,9 @@ module.exports = function createContextDB (opts) {
       const val = change.value
       const context = getContext(val)
       if (!context) return cb()
+
+      // each message's state gets written exactly once
+      if (state) return cb(null, state)
 
       let newState
       switch (val.topic) {
@@ -153,23 +153,36 @@ module.exports = function createContextDB (opts) {
   )
 
   return {
-    share: function share ({ context, recipient, seq=0 }, cb) {
-      node.changes.append({
-        topic: 'sharectx',
-        timestamp: utils.now(),
-        context: context,
-        recipient: recipient,
-        seq: seq
-      }, cb)
-    },
-    unshare: function unshare ({ context, recipient }, cb) {
-      node.changes.append({
-        topic: 'unsharectx',
-        timestamp: utils.now(),
-        context: context,
-        recipient: recipient
-      }, cb)
-    }
+    close,
+    share,
+    unshare
+  }
+
+  function share ({ context, recipient, seq=0 }, cb) {
+    node.changes.append({
+      topic: 'sharectx',
+      timestamp: utils.now(),
+      context: context,
+      recipient: recipient,
+      seq: seq
+    }, cb)
+  }
+
+  function unshare ({ context, recipient }, cb) {
+    node.changes.append({
+      topic: 'unsharectx',
+      timestamp: utils.now(),
+      context: context,
+      recipient: recipient
+    }, cb)
+  }
+
+  function close () {
+    if (closed) return
+
+    closed = true
+    msgDB.close()
+    ctxDB.close()
   }
 
   function forward (data) {
