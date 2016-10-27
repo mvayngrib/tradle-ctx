@@ -37,6 +37,7 @@ const ENTRY_PROP = constants.ENTRY_PROP
  * @param  {Object}   opts.db              database to use to track message context
  * @param  {Function} [opts.getMessageSeq] calculate the seq of a message object (defaults to msg => msg[SEQ])
  * @param  {Function} [opts.getContext]    calculate the context of a message object (defaults to msg => msg.context)
+ * @param  {Function} [opts.worker]        what to do with a given message (defaults to forwarding to shared-with party)
  */
 module.exports = function createContextDB (opts) {
   typeforce({
@@ -44,7 +45,8 @@ module.exports = function createContextDB (opts) {
     db: typeforce.String,
     // pass these in to override the defaults
     getMessageSeq: typeforce.maybe(typeforce.Function),
-    getContext: typeforce.maybe(typeforce.Function)
+    getContext: typeforce.maybe(typeforce.Function),
+    worker: typeforce.maybe(typeforce.Function)
   }, opts)
 
   const node = opts.node
@@ -65,6 +67,7 @@ module.exports = function createContextDB (opts) {
 
   const getMessageSeq = opts.getMessageSeq || defaultGetMessageSeq
   const getContext = opts.getContext || defaultGetContext
+  const worker = opts.worker || defaultWorker
   const indexedMsgDB = indexer({
     feed: node.changes,
     db: msgDB,
@@ -295,12 +298,15 @@ module.exports = function createContextDB (opts) {
     const identifier = data.context + data.recipient
     if (forwarding[identifier]) return
 
-    const to = { permalink: data.recipient }
     forwarding[identifier] = pump(
       createContextStream(data),
-      through.obj(function (data, enc, cb) {
-        // messages are immutable so permalink === link
-        node.send({ link: data.permalink, to: to }, cb)
+      through.obj(function (msgMeta, enc, cb) {
+        worker({
+          context: data.context,
+          recipient: data.recipient,
+          link: msgMeta.permalink,
+          permalink: msgMeta.permalink
+        }, cb)
       })
     )
   }
@@ -316,6 +322,15 @@ module.exports = function createContextDB (opts) {
       live: true,
       keys: false
     }, opts))
+  }
+
+
+  function defaultWorker (data, cb) {
+    // messages are immutable so permalink === link
+    node.send({
+      link: data.permalink,
+      to: { permalink: data.recipient }
+    }, cb)
   }
 }
 
