@@ -140,6 +140,93 @@ test('contexts', function (t) {
   })
 })
 
+test('custom context', function (t) {
+  // alice and bob chat
+  // bob sends dave some msgs
+  // bob shares alice<=>bob conversation with carol
+
+  contexts.nFriends(4, function (err, friends) {
+    if (err) throw err
+
+    const contextDBs = friends.map(node => {
+      return createContextsDB({
+        node: node,
+        db: 'contexts.db',
+        // context is a conversation
+        getContext: val => {
+          return getConversationIdentifier(val.author, val.recipient)
+        }
+      })
+    })
+
+    const [alice, bob, carol, dave] = friends
+    helpers.connect(friends)
+
+    const aliceBobConvo = []
+    ;[
+      {
+        [TYPE]: 'something',
+        hey: 'hey'
+      },
+      {
+        [TYPE]: 'something else',
+        hey: 'ho'
+      }
+    ].forEach(obj => {
+      alice.signAndSend({
+        to: bob._recipientOpts,
+        object: obj
+      }, function (err, result) {
+        if (err) throw err
+
+        aliceBobConvo.push(result.message.object)
+      })
+
+      bob.signAndSend({
+        to: dave._recipientOpts,
+        object: obj
+      }, rethrow)
+    })
+
+    bob.on('message', function (msg) {
+      bob.signAndSend({
+        to: { permalink: msg.author },
+        object: {
+          [TYPE]: 'blah',
+          not: 'around'
+        }
+      }, function (err, sent) {
+        if (err) throw err
+
+        aliceBobConvo.push(sent.message.object)
+      })
+    })
+
+    // bob
+    contextDBs[1].share({
+      context: getConversationIdentifier(alice.permalink, bob.permalink),
+      recipient: carol.permalink,
+      seq: 0
+    }, rethrow)
+
+    carol.on('message', function (msg) {
+      t.same(msg.object.object, aliceBobConvo.shift())
+      if (aliceBobConvo.length) return
+
+      t.end()
+      friends.forEach(friend => friend.destroy())
+    })
+  })
+})
+
 function rethrow (err) {
   if (err) throw err
+}
+
+function alphabetical (a, b) {
+  return a < b ? -1 : a === b ? 0 : 1
+}
+
+function getConversationIdentifier (a, b) {
+  return [a, b].sort(alphabetical).join(':')
 }

@@ -112,14 +112,16 @@ module.exports = function createContextDB (opts) {
     feed: node.changes,
     db: ctxDB,
     primaryKey: value => {
-      let context
-      if (value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE) {
+      let context = value.context
+      if (value.topic === topics.newobj) {
         // this is a forwarded message
         // we need update our cursor so we don't re-forward this next time
-        const twoTier = value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE
-        context = getContext(value.object)
-      } else {
-        context = getContext(value)
+        if (value.objectinfo.type === MESSAGE_TYPE) {
+          const twoTier = value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE
+          context = getContext(value.object)
+        } else {
+          context = getContext(value)
+        }
       }
 
       return `${context}:${getRecipient(value)}`
@@ -145,7 +147,9 @@ module.exports = function createContextDB (opts) {
     },
     reduce: function (state, change, cb) {
       const val = change.value
-      const context = state ? state.context : getContext(val)
+      const context = state ? state.context :
+        val.topic === topics.newobj ? getContext(val) : val.context
+
       if (!context) return cb()
 
       let newState
