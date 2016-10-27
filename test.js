@@ -20,6 +20,9 @@ test('contexts', function (t) {
     })
 
     const [alice, bob, carol] = friends
+    // console.log('alice', alice.permalink)
+    // console.log('bob', bob.permalink)
+    // console.log('carol', carol.permalink)
     helpers.connect(friends)
 
     let link
@@ -57,13 +60,10 @@ test('contexts', function (t) {
     })
 
     // no context
-    bob.signAndSend({
-      to: alice._recipientOpts,
-      object: {
-        [TYPE]: 'something',
-        hey: 'ho'
-      }
-    }, rethrow)
+    // bob.signAndSend({
+    //   to: alice._recipientOpts,
+    //   object: msg1
+    // }, rethrow)
 
     let togo = 2
     carol.once('message', msg => {
@@ -103,9 +103,9 @@ test('contexts', function (t) {
         if (received) return // shouldn't happen, but let's prevent the loop
 
         received = true
-        contextDBs[2].close(function () {
-          contextDBs[2] = createContextsDB({
-            node: carol,
+        contextDBs[1].close(function () {
+          contextDBs[1] = createContextsDB({
+            node: friends[1],
             db: 'contexts.db'
           })
 

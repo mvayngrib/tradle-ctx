@@ -4,6 +4,7 @@
 
 const EventEmitter = require('events').EventEmitter
 const debug = require('debug')('tradle:dbs:context')
+const deepEqual = require('deep-equal')
 const pump = require('pump')
 const through = require('through2')
 const indexer = require('feed-indexer')
@@ -26,7 +27,7 @@ const ENTRY_PROP = constants.ENTRY_PROP
  */
 
 /**
- * blockchain seals database, bootstrapped from log
+ * share messages by context property
  *
  * @alias module:contextsDB
  * @param  {Object}   opts
@@ -67,52 +68,102 @@ module.exports = function createContextDB (opts) {
     db: msgDB,
     primaryKey: 'permalink',
     entryProp: ENTRY_PROP,
-    preprocess: preprocess,
+    preprocess: function (change, cb) {
+      if (closed) return
+
+      const val = change.value
+      if (val.topic !== topics.newobj || val.type !== MESSAGE_TYPE) return cb()
+
+      keeper.get(val.permalink, function (err, body) {
+        if (err) return cb()
+
+        val.object = body
+        cb(null, change)
+      })
+    },
+    filter: value => value.topic === topics.newobj && value.type === MESSAGE_TYPE,
     reduce: function (state, change, cb) {
       const val = change.value
       const context = getContext(val)
       if (!context) return cb()
 
       // each message's state gets written exactly once
-      if (state)return cb(null, state)
+      if (state) return cb(null, state)
 
-      let newState
-      switch (val.topic) {
-      case topics.newobj:
-        return cb(null, {
-          permalink: val.permalink,
-          context: context,
-          recipient: getRecipient(val),
-          seq: getMessageSeq(change) // not the same as message.seq
-        })
-      }
-
-      cb()
+      return cb(null, {
+        permalink: val.permalink,
+        context: context,
+        recipient: getRecipient(val),
+        seq: getMessageSeq(change) // not the same as message.seq
+      })
     }
   })
 
   const msgDBIndexes = {
     context: indexedMsgDB.by('context', function (state) {
       // order by seq
-      return state.context + sep + lexint.pack(state.seq) + sep + state.permalink
+      return state.context + sep + hex(state.seq) + sep + state.permalink
     })
   }
 
   const indexedCtxDB = indexer({
     feed: node.changes,
     db: ctxDB,
-    primaryKey: value => `${getContext(value)}:${getRecipient(value)}`,
+    primaryKey: value => {
+      let context
+      if (value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE) {
+        // this is a forwarded message
+        // we need update our cursor so we don't re-forward this next time
+        const twoTier = value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE
+        context = getContext(value.object)
+      } else {
+        context = getContext(value)
+      }
+
+      return `${context}:${getRecipient(value)}`
+    },
     entryProp: ENTRY_PROP,
+    preprocess: function (change, cb) {
+      if (closed) return
+
+      const val = change.value
+      if (val.topic !== topics.newobj) return cb(null, change)
+
+      keeper.get(val.permalink, function (err, body) {
+        if (err) return cb()
+
+        val.object = body
+        cb(null, change)
+      })
+    },
     filter: function (val) {
-      return val.topic === customTopics.sharecontext || val.topic === customTopics.unsharecontext
+      return (val.topic === topics.newobj && val.type === MESSAGE_TYPE) ||
+            val.topic === customTopics.sharecontext ||
+            val.topic === customTopics.unsharecontext
     },
     reduce: function (state, change, cb) {
       const val = change.value
-      const context = getContext(val)
+      const context = state ? state.context : getContext(val)
       if (!context) return cb()
 
       let newState
       switch (val.topic) {
+      case topics.newobj:
+        newState = state ? clone(state) : newContextState({
+          context: context,
+          recipient: getRecipient(val)
+        })
+
+        if (val.object.object && val.object.object[TYPE] === MESSAGE_TYPE) {
+          // get original msg
+          return node.objects.get(val.objectinfo.link, function (err, originalMsg) {
+            newState.seq = getMessageSeq({ change: originalMsg[ENTRY_PROP], value: originalMsg })
+            cb(null, newState)
+          })
+        }
+
+        newState.seq = getMessageSeq(change)
+        break
       case customTopics.sharecontext:
         newState = state ? clone(state) : newContextState(val)
         newState.active = true
@@ -125,6 +176,10 @@ module.exports = function createContextDB (opts) {
         break
       }
 
+      if (deepEqual(state, newState)) {
+        return cb()
+      }
+
       cb(null, newState)
     }
   })
@@ -132,21 +187,14 @@ module.exports = function createContextDB (opts) {
   const myDebug = utils.subdebugger(debug, node.name || node.shortlink)
   const sep = indexedCtxDB.separator
   const indexes = {}
-  // indexes.recipient = indexedCtxDB.by('recipient')
-  // indexes.active = indexedCtxDB.by('active')
-  indexes.context = indexedCtxDB.by('context', function (state) {
-    if (!state.context) return
-    return state.context + sep + lexint.pack(state.seq)
-  })
-
   indexes.contextForRecipient = indexedCtxDB.by('cfr', function (state) {
-    if (!state.context) return
-    return state.active + sep + state.context + sep + state.recipient // + sep + lexint.pack(state.seq)
+    if (!state.context || !state.active) return
+    return state.context + sep + state.recipient // + sep + hex(state.seq)
   })
 
   const forwarding = {}
   pump(
-    indexes.contextForRecipient.createReadStream({ live: true, keys: false }),
+    indexes.contextForRecipient.createReadStream({ old: true, live: true, keys: false }),
     through.obj(function (data, enc, cb) {
       forward(data)
       cb()
@@ -204,26 +252,11 @@ module.exports = function createContextDB (opts) {
 
   function getMessageStream (data) {
     return msgDBIndexes.context.createReadStream({
-      gte: data.context + sep + lexint.pack(data.seq),
-      lte: data.context + sep + '\xff',
+      gt: data.context + sep + hex(data.seq),
+      lt: data.context + sep + '\xff',
       old: true,
       live: true,
       keys: false
-    })
-  }
-
-  function preprocess (change, cb) {
-    if (closed) return
-
-    const val = change.value
-    const topic = val.topic
-    if (val.type !== MESSAGE_TYPE || topic !== topics.newobj) return cb()
-
-    keeper.get(val.permalink, function (err, body) {
-      if (err) return cb(null, change)
-
-      val.object = body
-      cb(null, change)
     })
   }
 }
@@ -246,4 +279,8 @@ function defaultGetContext (val) {
 
 function defaultGetMessageSeq (change) {
   return change.change
+}
+
+function hex (n) {
+  return lexint.pack(n, 'hex')
 }
