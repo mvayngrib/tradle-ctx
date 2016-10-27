@@ -15,6 +15,7 @@
     "nkey-bitcoin": "^1.2.0",
     "nkey-curve25519": "^1.0.1",
     "nkey-ecdsa": "^1.1.0",
+    "stream-collector": "^1.0.1",
     "tape": "^4.6.2"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "deep-equal": "^1.0.1",
     "feed-indexer": "^1.2.1",
     "lexicographic-integer": "^1.1.0",
+    "once": "^1.4.0",
     "pump": "^1.0.1",
     "run-parallel": "^1.1.6",
     "through2": "^2.0.1",

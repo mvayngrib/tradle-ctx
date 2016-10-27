@@ -4,6 +4,7 @@
 
 const EventEmitter = require('events').EventEmitter
 const debug = require('debug')('tradle:dbs:context')
+const once = require('once')
 const deepEqual = require('deep-equal')
 const pump = require('pump')
 const through = require('through2')
@@ -11,6 +12,7 @@ const indexer = require('feed-indexer')
 const lexint = require('lexicographic-integer')
 const clone = require('xtend')
 const parallel = require('run-parallel')
+const PassThrough = require('readable-stream').PassThrough
 const tradle = require('@tradle/engine')
 const topics = tradle.topics
 const types = tradle.types
@@ -189,12 +191,15 @@ module.exports = function createContextDB (opts) {
   const indexes = {}
   indexes.contextForRecipient = indexedCtxDB.by('cfr', function (state) {
     if (!state.context || !state.active) return
-    return state.context + sep + state.recipient // + sep + hex(state.seq)
+
+    // end with a `sep` otherwise we won't be able to stream with:
+    //   eq:  context + sep + recipient
+    return state.context + sep + state.recipient + sep
   })
 
   const forwarding = {}
   pump(
-    indexes.contextForRecipient.createReadStream({ old: true, live: true, keys: false }),
+    cursor(),
     through.obj(function (data, enc, cb) {
       forward(data)
       cb()
@@ -204,7 +209,53 @@ module.exports = function createContextDB (opts) {
   return {
     close,
     share,
-    unshare
+    unshare,
+    cursor,
+    seq: position,
+    context: createContextStream,
+    messages
+  }
+
+  function position ({ context, recipient }, cb) {
+    if (!(context && recipient)) {
+      throw new Error('expected "context" and "recipient"')
+    }
+
+    cb = once(cb)
+    cursor({
+      eq: context + sep + recipient,
+      live: false
+    })
+    .once('data', data => cb(null, data.seq))
+    .on('error', cb)
+    .on('end', () => cb(new Error('context not shared with recipient')))
+  }
+
+  function cursor (opts) {
+    opts = clone({
+      old: true,
+      live: true,
+      keys: false
+    }, opts || {})
+
+    return indexes.contextForRecipient.createReadStream(opts)
+  }
+
+  function messages (opts) {
+    const stream = new PassThrough({ objectMode: true })
+    position(opts, function (err, seq) {
+      if (err) {
+        stream.emit('error', err)
+        return stream.end()
+      }
+
+      pump(
+        createContextStream(clone(opts, { seq })),
+        stream
+      )
+    })
+
+    return stream
   }
 
   function share ({ context, recipient, seq=0 }, cb) {
@@ -242,7 +293,7 @@ module.exports = function createContextDB (opts) {
 
     const to = { permalink: data.recipient }
     forwarding[identifier] = pump(
-      getMessageStream(data),
+      createContextStream(data),
       through.obj(function (data, enc, cb) {
         // messages are immutable so permalink === link
         node.send({ link: data.permalink, to: to }, cb)
@@ -250,14 +301,17 @@ module.exports = function createContextDB (opts) {
     )
   }
 
-  function getMessageStream (data) {
-    return msgDBIndexes.context.createReadStream({
-      gt: data.context + sep + hex(data.seq),
-      lt: data.context + sep + '\xff',
+  function createContextStream (opts) {
+    if (typeof opts === 'string') opts = { context: opts }
+    if (!opts.context) throw new Error('expected "context"')
+
+    return msgDBIndexes.context.createReadStream(clone({
+      gt: opts.context + sep + hex(opts.seq || 0),
+      lt: opts.context + sep + '\xff',
       old: true,
       live: true,
       keys: false
-    })
+    }, opts))
   }
 }
 
@@ -265,10 +319,10 @@ function getRecipient (val) {
   return val.recipient
 }
 
-function newContextState (val) {
+function newContextState ({ context, recipient }) {
   return {
-    context: val.context,
-    recipient: val.recipient,
+    context: context,
+    recipient: recipient,
     seq: 0
   }
 }

@@ -1,6 +1,7 @@
 'use strict'
 
 const test = require('tape')
+const collect = require('stream-collector')
 const tradle = require('@tradle/engine')
 const helpers = require('@tradle/engine/test/helpers')
 const contexts = require('@tradle/engine/test/contexts')
@@ -56,14 +57,25 @@ test('contexts', function (t) {
         context,
         recipient: carol.permalink,
         seq: 0
+      }, rethrow)
+
+      collect(contextDBs[1].messages({
+        context,
+        recipient: carol.permalink,
+        live: false
+      }), function (err, msgs) {
+        if (err) throw err
+
+        t.equal(msgs.length, 1)
+        t.equal(msgs[0].permalink, msg1wrapper.permalink)
       })
     })
 
     // no context
-    // bob.signAndSend({
-    //   to: alice._recipientOpts,
-    //   object: msg1
-    // }, rethrow)
+    bob.signAndSend({
+      to: alice._recipientOpts,
+      object: msg1
+    }, rethrow)
 
     let togo = 2
     carol.once('message', msg => {
@@ -103,17 +115,25 @@ test('contexts', function (t) {
         if (received) return // shouldn't happen, but let's prevent the loop
 
         received = true
-        contextDBs[1].close(function () {
-          contextDBs[1] = createContextsDB({
+        let cdb = contextDBs[1]
+        cdb.close(function () {
+          cdb = createContextsDB({
             node: friends[1],
             db: 'contexts.db'
           })
 
-          setTimeout(function () {
-            // hacky way to check whether contextDB starts resending stuff it already sent
+          // no messages should still be queued
+          collect(cdb.messages({
+            context: context,
+            recipient: carol.permalink,
+            live: false
+          }), function (err, msgs) {
+            if (err) throw err
+
+            t.equal(msgs.length, 0)
             t.end()
             friends.forEach(friend => friend.destroy())
-          }, 1000)
+          })
         })
       })
     })
