@@ -66,7 +66,7 @@ module.exports = function createContextDB (opts) {
   node.once('destroying', close)
 
   const getMessageSeq = opts.getMessageSeq || defaultGetMessageSeq
-  const getContext = opts.getContext || defaultGetContext
+  const getContext = wrapGetContext(opts.getContext || defaultGetContext)
   const worker = opts.worker || defaultWorker
   const indexedMsgDB = indexer({
     feed: node.changes,
@@ -89,11 +89,11 @@ module.exports = function createContextDB (opts) {
     filter: value => value.topic === topics.newobj && value.type === MESSAGE_TYPE,
     reduce: function (state, change, cb) {
       const val = change.value
-      const context = getContext(val)
-      if (!context) return cb()
-
       // each message's state gets written exactly once
       if (state) return cb(null, state)
+
+      const context = state ? state.context : getContext(val)
+      if (!context) return cb()
 
       return cb(null, {
         permalink: val.permalink,
@@ -115,19 +115,8 @@ module.exports = function createContextDB (opts) {
     feed: node.changes,
     db: ctxDB,
     primaryKey: value => {
-      let context = value.context
-      if (value.topic === topics.newobj) {
-        // this is a forwarded message
-        // we need update our cursor so we don't re-forward this next time
-        if (value.objectinfo.type === MESSAGE_TYPE) {
-          const twoTier = value.topic === topics.newobj && value.objectinfo.type === MESSAGE_TYPE
-          context = getContext(value.object)
-        } else {
-          context = getContext(value)
-        }
-      }
-
-      return `${context}:${getRecipient(value)}`
+      const context = getContext(value, true)
+      if (context) return `${context}:${getRecipient(value)}`
     },
     entryProp: ENTRY_PROP,
     preprocess: function (change, cb) {
@@ -150,9 +139,7 @@ module.exports = function createContextDB (opts) {
     },
     reduce: function (state, change, cb) {
       const val = change.value
-      const context = state ? state.context :
-        val.topic === topics.newobj ? getContext(val) : val.context
-
+      const context = state ? state.context : getContext(val, true)
       if (!context) return cb()
 
       let newState
@@ -347,7 +334,18 @@ function newContextState ({ context, recipient }) {
 }
 
 function defaultGetContext (val) {
-  return val.context || val.object.context
+  return val.object.context
+}
+
+function wrapGetContext (getContext) {
+  return function (value, testSecondTier) {
+    if (value.topic !== topics.newobj) return value.context
+
+    // if this is a forwarded message
+    // we need update our cursor so we don't re-forward this next time
+    const base = testSecondTier && value.objectinfo.type === MESSAGE_TYPE ? value.object : value
+    return getContext(base)
+  }
 }
 
 function defaultGetMessageSeq (change) {
