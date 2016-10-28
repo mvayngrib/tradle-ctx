@@ -129,6 +129,15 @@ module.exports = function createContextDB (opts) {
         if (err) return cb()
 
         val.object = body
+        if (body[TYPE] === MESSAGE_TYPE) {
+          return node.objects.get(val.objectinfo.permalink, function (err, metadata) {
+            if (err) return cb()
+
+            val.objectinfo = metadata
+            cb(null, change)
+          })
+        }
+
         cb(null, change)
       })
     },
@@ -153,6 +162,9 @@ module.exports = function createContextDB (opts) {
         if (val.object.object && val.object.object[TYPE] === MESSAGE_TYPE) {
           // get original msg
           return node.objects.get(val.objectinfo.link, function (err, originalMsg) {
+            // TODO: figure out the right thing to do here in case of err
+            if (err) return cb()
+
             newState.seq = getMessageSeq({ change: originalMsg[ENTRY_PROP], value: originalMsg })
             cb(null, newState)
           })
@@ -232,7 +244,13 @@ module.exports = function createContextDB (opts) {
       keys: false
     }, opts || {})
 
-    return indexes.contextForRecipient.createReadStream(opts)
+    return pump(
+      indexes.contextForRecipient.createReadStream(opts),
+      through.obj(function (data, enc, cb) {
+        if (!data.active) return cb()
+        cb(null, data)
+      })
+    )
   }
 
   function messages (opts) {
@@ -254,7 +272,7 @@ module.exports = function createContextDB (opts) {
 
   function share ({ context, recipient, seq=0 }, cb) {
     node.changes.append({
-      topic: 'sharectx',
+      topic: customTopics.sharecontext,
       timestamp: utils.now(),
       context: context,
       recipient: recipient,
@@ -264,7 +282,7 @@ module.exports = function createContextDB (opts) {
 
   function unshare ({ context, recipient }, cb) {
     node.changes.append({
-      topic: 'unsharectx',
+      topic: customTopics.unsharecontext,
       timestamp: utils.now(),
       context: context,
       recipient: recipient
@@ -343,7 +361,7 @@ function wrapGetContext (getContext) {
 
     // if this is a forwarded message
     // we need update our cursor so we don't re-forward this next time
-    const base = testSecondTier && value.objectinfo.type === MESSAGE_TYPE ? value.object : value
+    const base = testSecondTier && value.objectinfo.type === MESSAGE_TYPE ? value.objectinfo : value
     return getContext(base)
   }
 }
