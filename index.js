@@ -311,7 +311,13 @@ module.exports = function createContextDB (opts) {
           recipient: data.recipient,
           link: msgMeta.permalink,
           permalink: msgMeta.permalink
-        }, cb)
+        }, function (err) {
+          if (err) {
+            myDebug('failed to send message', data.permalink, 'to', data.recipient, err)
+          }
+
+          cb()
+        })
       })
     )
   }
