@@ -96,6 +96,7 @@ module.exports = function createContextDB (opts) {
       if (!context) return cb()
 
       return cb(null, {
+        author: val.author,
         permalink: val.permalink,
         context: context,
         recipient: getRecipient(val),
@@ -306,11 +307,14 @@ module.exports = function createContextDB (opts) {
     forwarding[identifier] = pump(
       createContextStream(data),
       through.obj(function (msgMeta, enc, cb) {
+        if (msgMeta.author === data.recipient) return cb()
+
         worker({
           context: data.context,
           recipient: data.recipient,
           link: msgMeta.permalink,
-          permalink: msgMeta.permalink
+          permalink: msgMeta.permalink,
+          author: msgMeta.author
         }, function (err) {
           if (err) {
             myDebug('failed to send message', data.permalink, 'to', data.recipient, err)
