@@ -317,7 +317,7 @@ module.exports = function createContextDB (opts) {
           author: msgMeta.author
         }, function (err) {
           if (err) {
-            myDebug('failed to send message', data.permalink, 'to', data.recipient, err)
+            myDebug('failed to send message', msgMeta.permalink, 'to', data.recipient, err)
           }
 
           cb()
