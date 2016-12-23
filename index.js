@@ -186,7 +186,7 @@ module.exports = function createContextDB (opts) {
       }
 
       if (deepEqual(state, newState)) {
-        return cb()
+        return cb(null, state)
       }
 
       cb(null, newState)
