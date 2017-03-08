@@ -19,7 +19,7 @@
     "tape": "^4.6.2"
   },
   "dependencies": {
-    "@tradle/engine": "^3.5.0",
+    "@tradle/engine": ">=3.5.0",
     "debug": "^2.2.0",
     "deep-equal": "^1.0.1",
     "feed-indexer": "^1.2.1",
